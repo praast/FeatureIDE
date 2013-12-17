@@ -65,6 +65,7 @@ import composer.FSTGenComposer;
 import composer.FSTGenComposerExtension;
 import composer.ICompositionErrorListener;
 import composer.IParseErrorListener;
+import composer.rules.meta.FeatureModelInfo;
 import de.ovgu.cide.fstgen.ast.FSTNode;
 import de.ovgu.cide.fstgen.ast.FSTTerminal;
 import de.ovgu.featureide.core.IFeatureProject;
@@ -349,12 +350,18 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 	private void buildDefaultMetaProduct(final String configPath,
 			final String basePath, final String outputPath) {
 		new FeatureModelClassGenerator(featureProject);
+		//FeatureModelInfo modelInfo = new FeatureIDEModelInfo();
 		FSTGenComposerExtension.key = IFeatureProject.META_THEOREM_PROVING.equals(featureProject.getMetaProductGeneration()) ||
 				IFeatureProject.META_MODEL_CHECKING_BDD_JAVA_JML.equals(featureProject.getMetaProductGeneration());
-		composer = new FSTGenComposerExtension();
+		composer = new FSTGenComposerExtension();//modelInfo);
 		composer.addCompositionErrorListener(compositionErrorListener);
 		FeatureModel featureModel = featureProject.getFeatureModel();
-		List<String> featureOrderList = featureModel.getConcreteFeatureNames();
+		//List<String> featureOrderList = featureModel.getConcreteFeatureNames();
+		List<String> featureOrderList;
+		if (featureModel.isFeatureOrderUserDefined())
+			featureOrderList = featureModel.getFeatureOrderList();
+		else// if (featureModel.isFeatureOrderInXML())
+			featureOrderList = featureModel.getFeatureList();
 		// dead features should not be composed
 		LinkedList<String> deadFeatures = new LinkedList<String>();
 		for (Feature deadFeature : featureModel.getAnalyser().getDeadFeatures()) {
@@ -370,8 +377,10 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 		}
 		
 		try {
+			FeatureModelInfo modelInfo = new FeatureIDEModelInfo(featureModel);
+			((FSTGenComposerExtension) composer).setModelInfo(modelInfo);
 			((FSTGenComposerExtension) composer).buildMetaProduct(
-					getArguments(configPath, basePath, outputPath, CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING)
+					getArguments(configPath, basePath, outputPath, getContractParameter())//CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING)
 					, features);
 		} catch (TokenMgrError e) {
 		} catch (Error e) {
