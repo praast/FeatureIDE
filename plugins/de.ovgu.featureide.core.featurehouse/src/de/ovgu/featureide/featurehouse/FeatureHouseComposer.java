@@ -101,6 +101,7 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 	private static final String CONTRACT_COMPOSITION_EXPLICIT_CONTRACT_REFINEMENT = "explicit contract refinement";
 	private static final String CONTRACT_COMPOSITION_CONTRACT_OVERRIDING = "contract overriding";
 	private static final String CONTRACT_COMPOSITION_PLAIN_CONTRACTING = "plain contracting";
+	private static final String CONTRACT_COMPOSITION_PLAIN_CONTRACT = "plain_contracting";
 	private static final String CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING = "explicit_contracting";
 	private static final String CONTRACT_COMPOSITION_CONSECUTIVE_CONTRACTING = "consecutive_contracting";
 	private static final String CONTRACT_COMPOSITION_CUMULATIVE_CONTRACT_REFINEMENT = "cumulative contract refinement";
@@ -377,10 +378,16 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 		}
 		
 		try {
+			String[] args = getArguments(configPath, basePath, outputPath, getContractParameter());
+			//((FSTGenComposerExtension)composer).buildFullFST(args, features);
+			
+			//ArrayList<FSTNode> nodes = composer.getFstnodes();
+			
+			
 			FeatureModelInfo modelInfo = new FeatureIDEModelInfo(featureModel);
 			((FSTGenComposerExtension) composer).setModelInfo(modelInfo);
 			((FSTGenComposerExtension) composer).buildMetaProduct(
-					getArguments(configPath, basePath, outputPath, getContractParameter())//CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING)
+					args//CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING)
 					, features);
 		} catch (TokenMgrError e) {
 		} catch (Error e) {
@@ -739,7 +746,7 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 			return CONTRACT_COMPOSITION_NONE;
 		} else if (CONTRACT_COMPOSITION_PLAIN_CONTRACTING
 				.equals(contractComposition)) {
-			return CONTRACT_COMPOSITION_PLAIN_CONTRACTING;
+			return CONTRACT_COMPOSITION_PLAIN_CONTRACT;
 		} else if (CONTRACT_COMPOSITION_CONTRACT_OVERRIDING
 				.equals(contractComposition)) {
 			return CONTRACT_COMPOSITION_CONTRACT_OVERRIDING;

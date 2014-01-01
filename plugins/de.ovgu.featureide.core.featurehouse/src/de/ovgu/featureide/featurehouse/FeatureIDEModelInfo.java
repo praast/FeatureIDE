@@ -20,18 +20,19 @@
  */
 package de.ovgu.featureide.featurehouse;
 
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
-
-import org.sat4j.specs.TimeoutException;
 
 import composer.rules.meta.FeatureModelInfo;
+import de.ovgu.cide.fstgen.ast.FSTNode;
+import de.ovgu.cide.fstgen.ast.FSTNonTerminal;
 import de.ovgu.featureide.fm.core.Feature;
-import de.ovgu.featureide.fm.core.FeatureDependencies;
 import de.ovgu.featureide.fm.core.FeatureModel;
-import de.ovgu.featureide.fm.core.FeatureModelAnalyzer;
+import de.ovgu.featureide.fm.core.configuration.Configuration;
+import de.ovgu.featureide.fm.core.configuration.SelectableFeature;
+import de.ovgu.featureide.fm.core.configuration.Selection;
+import de.ovgu.featureide.fm.core.configuration.SelectionNotPossibleException;
 
 /**
  * TODO description
@@ -41,9 +42,12 @@ import de.ovgu.featureide.fm.core.FeatureModelAnalyzer;
 public class FeatureIDEModelInfo implements FeatureModelInfo {
 	
 	private FeatureModel featureModel;
-	private FeatureModelAnalyzer featureModelAnalyzer;
-	private FeatureDependencies featureDependencies;
-	private List<Feature> coreFeatures;
+	private Configuration currentConfig;
+	private List<String> coreFeatureNames;
+	private boolean validSelect = true;
+	private boolean validReject = true;
+	// (className, (methodName, featureName))
+	private HashMap<String, HashMap<String, List<Feature>>> rootsForMethod = new HashMap<String, HashMap<String,List<Feature>>>();
 
 	
 	FeatureIDEModelInfo(){
@@ -52,79 +56,7 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	
 	FeatureIDEModelInfo(FeatureModel fm){
 		featureModel = fm;
-		featureModelAnalyzer = fm.getAnalyser();
-		featureDependencies = featureModelAnalyzer.getDependencies();
-	}
-	
-	private LinkedList<Feature> nameListToFeatureList(List<String> names){
-		LinkedList<Feature> features = new LinkedList<Feature>();
-		for (String featureName : names){
-			features.add(featureModel.getFeature(featureName));
-		}
-		return features;
-	}
-	
-	private Set<Feature> nameListToFeatureSet(List<String> names){
-		Set<Feature> features = new HashSet<Feature>();
-		for (String featureName : names){
-			features.add(featureModel.getFeature(featureName));
-		}
-		return features;
-	}
-	
-	private List<Feature> getCoreFeatures(){
-		if (coreFeatures == null)
-			coreFeatures = featureModelAnalyzer.getCoreFeatures();
-		
-		return coreFeatures;
-	}
-	
-	private List<Set<Feature>> computeAllSubSets(Set<Feature> features){
-		LinkedList<Set<Feature>> result = new LinkedList<Set<Feature>>();
-		
-		for (Feature feature : features){
-			int setCount = result.size();
-			for (int i = 0; i < setCount; i++){
-				Set<Feature> newSet = new HashSet<Feature>();
-				newSet.addAll(result.get(i));
-				newSet.add(feature);
-				result.add(newSet);
-			}
-			Set<Feature> featureSet = new HashSet<Feature>();
-			featureSet.add(feature);
-			result.add(featureSet);
-		}
-		
-		return result;
-	}
-	
-	/* (non-Javadoc)
-	 * @see composer.rules.meta.FeatureModelInfo#hasValidProduct(java.util.List, java.util.List)
-	 */
-	@Override
-	public boolean hasValidProduct(List<String> selectedFeatures, List<String> rejectedFeatures) {
-		Set<Feature> selected = nameListToFeatureSet(selectedFeatures);
-		List<Set<Feature>> rejected = new LinkedList<Set<Feature>>();
-		try{
-			// check if selectedt FEatures fit together
-			if (!featureModelAnalyzer.exists(selected))
-				return false;
-			
-			if (rejectedFeatures.isEmpty())
-				return true;
-			
-			rejected.add(nameListToFeatureSet(rejectedFeatures));			
-			
-			boolean missing = featureModelAnalyzer.mayBeMissing(selected, rejected);
-			
-			return missing;
-			
-			// check if a Selected Feature implies a rejected
-			
-			
-		} catch (TimeoutException te){
-			return true;
-		}
+		currentConfig = new Configuration(featureModel);
 	}
 
 	/* (non-Javadoc)
@@ -132,10 +64,29 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public boolean isObligatory(String featureName) {
-		for (Feature feature : getCoreFeatures()){
+		if (coreFeatureNames == null){
+			Configuration newConfig = new Configuration(featureModel);
+			coreFeatureNames = new LinkedList<String>();
+			for (Feature feature : newConfig.getSelectedFeatures())
+				coreFeatureNames.add(feature.getName());
+		}
+		
+		return coreFeatureNames.contains(featureName);
+	}
+
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isObligatory(java.lang.String)
+	 */
+	@Override
+	public boolean isObligatory(String featureName,boolean useSelection) {
+		if (!useSelection)
+			return isObligatory(featureName);
+		
+		for (Feature feature : currentConfig.getSelectedFeatures())
 			if (feature.getName().equals(featureName))
 				return true;
-		}
+		
 		return false;
 	}
 
@@ -143,69 +94,281 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isObligatoryForMethod(java.lang.String, java.lang.String)
 	 */
 	@Override
-	public boolean isObligatoryForMethod(String methodName, String featureName) {
-		if (isObligatory(featureName))
-			return true;
-		
-		return false;
+	public boolean isObligatoryForMethod(String className, String methodName, String featureName) {
+		HashMap<String, List<Feature>> methodFeatures = rootsForMethod.get(className);
+		if (methodFeatures == null)
+			return false;
+		List<Feature> features = methodFeatures.get(methodName);
+		if (features == null)
+			return false;
+		for (Feature rootFeature : features){
+			if (!rootFeature.getName().equals(featureName)){
+				Configuration config = new Configuration(featureModel);
+				config.setManual(rootFeature.getName(), Selection.SELECTED);
+				if (config.getSelectablefeature(featureName).getAutomatic() != Selection.SELECTED)
+					return false;
+			} 
+		}
+
+		return true;
 	}
 
 	/* (non-Javadoc)
-	 * @see composer.rules.meta.FeatureModelInfo#isFeatureImplied(java.lang.String, java.util.List, java.util.List)
+	 * @see composer.rules.meta.FeatureModelInfo#isObligatoryForMethod(java.lang.String, java.lang.String)
 	 */
 	@Override
-	public boolean isFeatureImplied(String featureName,
-			List<String> selectedFeatures, List<String> rejectedFeatures) {
+	public boolean isObligatoryForMethod(String className, String methodName, String featureName, boolean useSelection) {
+		if (!useSelection)
+			return isObligatoryForMethod(className, methodName, featureName);
 		
-		if (selectedFeatures.isEmpty() && rejectedFeatures.isEmpty())
+		HashMap<String, List<Feature>> methodFeatures = rootsForMethod.get(className);
+		if (methodFeatures == null)
 			return false;
-			
-		List<Set<Feature>> selectedSets = computeAllSubSets(nameListToFeatureSet(selectedFeatures));
-		Set<Feature> implied = new HashSet<Feature>();
-		implied.add(featureModel.getFeature(featureName));
+		List<Feature> features = methodFeatures.get(methodName);
+		if (features == null)
+			return false;
+		for (Feature rootFeature : features){
+			if (!rootFeature.getName().equals(featureName)){
+				Configuration config = new Configuration(featureModel);
+				for (Feature feat : currentConfig.getSelectedFeatures())
+					config.setManual(feat.getName(),Selection.SELECTED);
+				for (Feature feat : currentConfig.getUnSelectedFeatures())
+					config.setManual(feat.getName(),Selection.UNSELECTED);
+				config.setManual(rootFeature.getName(), Selection.SELECTED);
+				if (config.getSelectablefeature(featureName).getAutomatic() != Selection.SELECTED)
+					return false;
+			} 
+		}
+
+		return true;
+	}
+
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#selectFeature(java.lang.String)
+	 */
+	@Override
+	public void selectFeature(String featureName) {
+		try{
+			currentConfig.setManual(featureName, Selection.SELECTED);
+		} catch (SelectionNotPossibleException ex){
+			validSelect = false;
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#rejectFeature(java.lang.String)
+	 */
+	@Override
+	public void rejectFeature(String featureName) {
+		try{
+			currentConfig.setManual(featureName, Selection.UNSELECTED);	
+		} catch (SelectionNotPossibleException ex){
+			validReject = false;
+		}	
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#resetSelections()
+	 */
+	@Override
+	public void resetSelections() {
+		for (Feature feature : currentConfig.getSelectedFeatures())
+			currentConfig.setManual(feature.getName(), Selection.UNDEFINED);
+		validSelect = true;
 		
-		for (Set<Feature> featureSet : selectedSets){
-			try{
-				if (featureModelAnalyzer.checkImplies(featureSet, implied))
-					return true;
-			} catch (TimeoutException t){
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#resetRejections()
+	 */
+	@Override
+	public void resetRejections() {
+		for (Feature feature : currentConfig.getUnSelectedFeatures())
+			currentConfig.setManual(feature.getName(), Selection.UNDEFINED);
+		validReject = true;
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#reset()
+	 */
+	@Override
+	public void reset() {
+		currentConfig.resetValues();
+		validSelect = true;
+		validReject = true;
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isValidSelection()
+	 */
+	@Override
+	public boolean isValidSelection() {
+		return validSelect && validReject && currentConfig.number() > 0;
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isSelectable(java.lang.String)
+	 */
+	@Override
+	public boolean isSelectable(String featureName) {
+		return currentConfig.leadToValidConfiguration(
+						currentConfig.getSelectablefeature(featureName), 
+						Selection.SELECTED, 
+						currentConfig.getSelectablefeature(featureName).getManual());
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isRejectable(java.lang.String)
+	 */
+	@Override
+	public boolean isRejectable(String featureName) {
+		return currentConfig.leadToValidConfiguration(
+				currentConfig.getSelectablefeature(featureName), 
+				Selection.UNSELECTED, 
+				currentConfig.getSelectablefeature(featureName).getManual());
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isSelectionImplied(java.lang.String)
+	 */
+	@Override
+	public boolean isSelectionImplied(String featureName) {
+		return currentConfig.getSelectablefeature(featureName).getSelection() == Selection.SELECTED;
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#isRejectionImplied(java.lang.String)
+	 */
+	@Override
+	public boolean isRejectionImplied(String featureName) {
+		return currentConfig.getSelectablefeature(featureName).getSelection() == Selection.UNSELECTED;
+	}
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#addFeatureNodes(java.util.List)
+	 */
+	@Override
+	public void addFeatureNodes(List<FSTNonTerminal> features) {
+		rootsForMethod = new HashMap<String, HashMap<String,List<Feature>>>();
+		for (FSTNonTerminal featureNode : features){
+			String featureName = getFeatureName(featureNode);
+			
+			// get all method-Nodes
+			for (FSTNode methodNode : getMethodNodes(featureNode)){
+				String className = getClassName(methodNode);
+				String methodName = getMethodName(methodNode);
 				
+				HashMap<String, List<Feature>> methodFeature = rootsForMethod.get(className);
+				if (methodFeature == null) {
+					methodFeature = new HashMap<String, List<Feature>>();
+					rootsForMethod.put(className, methodFeature);
+				}
+				
+				List<Feature> featureList = methodFeature.get(methodName);
+				if (featureList == null){
+					featureList = new LinkedList<Feature>();
+					methodFeature.put(methodName, featureList);
+				}
+				
+				if (!featureList.contains(featureName))
+					addToFeatureList(featureModel.getFeature(featureName),featureList);
 			}
 		}
+	}
+
+	/**
+	 * @param methodNode
+	 * @return
+	 */
+	private String getMethodName(FSTNode methodNode) {
+		if (methodNode == null)
+			return "";
+		if (methodNode.getType().contains("MethodDeclaration")){
+			String name = methodNode.getName();
+			if (name.contains("(")){
+				name = name.substring(0,name.indexOf("(")).trim();
+			}
+			return name; 
+		}
+		return getMethodName(methodNode.getParent());
+	}
+
+	/**
+	 * @param methodNode
+	 * @return
+	 */
+	private String getClassName(FSTNode methodNode) {
+		if (methodNode == null)
+			return "";
+		if (methodNode.getType().contains("ClassDeclaration"))
+			return methodNode.getName();
+		return getClassName(methodNode.getParent());
+	}
+
+	/**
+	 * @param featureNode
+	 * @return
+	 */
+	private List<FSTNode> getMethodNodes(FSTNode featureNode) {
+		LinkedList<FSTNode> result = new LinkedList<FSTNode>();
+		if (featureNode == null)
+			return result;
+		if (featureNode.getType().contains("MethodDeclaration")) {
+			result.add(featureNode);
+			return result;
+		}
+		if (!(featureNode instanceof FSTNonTerminal))
+			return result;
 		
-		// TODO: check whether the absence of a Feature or a Number of Features implies
-		//       that the Feature featureName has to be selected (e.g. because all other Features of an alternative are
-		//       rejected (then the Parent must be selected) )
+		for (FSTNode child : ((FSTNonTerminal)featureNode).getChildren())
+			result.addAll(getMethodNodes(child));
 		
-		return false;
+		return result;
+	}
+
+	/**
+	 * @param featureNode
+	 * @return
+	 */
+	private String getFeatureName(FSTNode featureNode) {
+		return featureNode.getName();
 	}
 
 	/* (non-Javadoc)
-	 * @see composer.rules.meta.FeatureModelInfo#isNotFeatureImplied(java.lang.String, java.util.List, java.util.List)
+	 * @see composer.rules.meta.FeatureModelInfo#clearFeatureNodes()
 	 */
 	@Override
-	public boolean isNotFeatureImplied(String featureName,
-			List<String> selectedFeatures, List<String> rejectedFeatures) {
-
-		if (selectedFeatures.isEmpty() && rejectedFeatures.isEmpty())
+	public void clearFeatureNodes() {
+		rootsForMethod.clear();
+	}
+	
+	private void addToFeatureList(Feature feature, List<Feature> featureList){
+		if (featureList.isEmpty()){
+			featureList.add(feature);
+			return;
+		}
+		
+		if (featureList.contains(feature))
+			return;
+		
+		for (Feature listFeature : featureList){
+			if (isParent(feature,listFeature))
+				return;
+			if (isParent(listFeature,feature))
+				featureList.remove(listFeature);
+		}
+		
+		featureList.add(feature);
+			
+	}
+	
+	private boolean isParent(Feature child, Feature parent){
+		if (child.getParent() == null)
 			return false;
-		
-		Feature feature = featureModel.getFeature(featureName); 
-
-		
-		// always(featureName,rejectedFeature) -> true
-		for (Feature rejectedFeature : nameListToFeatureSet(rejectedFeatures)){
-			if (featureDependencies.isAlways(feature, rejectedFeature))
-				return true;
-		}
-		
-		// never(selectedFeature,featureName)  -> true
-		for (Feature selectedFeature : nameListToFeatureSet(selectedFeatures)){
-			if (featureDependencies.never(selectedFeature).contains(feature))
-				return true;
-		}
-		
-		return false;
+		if (child.getParent() == parent)
+			return true;
+		return isParent(child.getParent(),parent);
 	}
 
 }
