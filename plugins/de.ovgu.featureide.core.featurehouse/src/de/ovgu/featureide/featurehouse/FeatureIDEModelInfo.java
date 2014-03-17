@@ -23,6 +23,9 @@ package de.ovgu.featureide.featurehouse;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
+
+import org.prop4j.NodeWriter;
 
 import composer.rules.meta.FeatureModelInfo;
 import de.ovgu.cide.fstgen.ast.FSTNode;
@@ -33,6 +36,7 @@ import de.ovgu.featureide.fm.core.configuration.Configuration;
 import de.ovgu.featureide.fm.core.configuration.SelectableFeature;
 import de.ovgu.featureide.fm.core.configuration.Selection;
 import de.ovgu.featureide.fm.core.configuration.SelectionNotPossibleException;
+import de.ovgu.featureide.fm.core.editing.NodeCreator;
 
 /**
  * TODO description
@@ -49,6 +53,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	// (className, (methodName, featureName))
 	private HashMap<String, HashMap<String, List<Feature>>> rootsForMethod = new HashMap<String, HashMap<String,List<Feature>>>();
 
+	private boolean obligatory = true;
+	private boolean obligatoryMethod = true;
+	private boolean fm = true;
 	
 	FeatureIDEModelInfo(){
 		
@@ -63,7 +70,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isObligatory(java.lang.String)
 	 */
 	@Override
-	public boolean isObligatory(String featureName) {
+	public boolean isCoreFeature(String featureName) {
+		if (!obligatory)
+			return false;
 		if (coreFeatureNames == null){
 			Configuration newConfig = new Configuration(featureModel);
 			coreFeatureNames = new LinkedList<String>();
@@ -79,9 +88,11 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isObligatory(java.lang.String)
 	 */
 	@Override
-	public boolean isObligatory(String featureName,boolean useSelection) {
+	public boolean isCoreFeature(String featureName,boolean useSelection) {
+		if (!obligatory)
+			return false;
 		if (!useSelection)
-			return isObligatory(featureName);
+			return isCoreFeature(featureName);
 		
 		for (Feature feature : currentConfig.getSelectedFeatures())
 			if (feature.getName().equals(featureName))
@@ -94,7 +105,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isObligatoryForMethod(java.lang.String, java.lang.String)
 	 */
 	@Override
-	public boolean isObligatoryForMethod(String className, String methodName, String featureName) {
+	public boolean isMethodCoreFeature(String className, String methodName, String featureName) {
+		if (!obligatoryMethod)
+			return false;
 		HashMap<String, List<Feature>> methodFeatures = rootsForMethod.get(className);
 		if (methodFeatures == null)
 			return false;
@@ -111,15 +124,18 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 		}
 
 		return true;
+		
 	}
 
 	/* (non-Javadoc)
 	 * @see composer.rules.meta.FeatureModelInfo#isObligatoryForMethod(java.lang.String, java.lang.String)
 	 */
 	@Override
-	public boolean isObligatoryForMethod(String className, String methodName, String featureName, boolean useSelection) {
+	public boolean isMethodCoreFeature(String className, String methodName, String featureName, boolean useSelection) {
+		if (!obligatoryMethod)
+			return false;
 		if (!useSelection)
-			return isObligatoryForMethod(className, methodName, featureName);
+			return isMethodCoreFeature(className, methodName, featureName);
 		
 		HashMap<String, List<Feature>> methodFeatures = rootsForMethod.get(className);
 		if (methodFeatures == null)
@@ -149,6 +165,8 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public void selectFeature(String featureName) {
+		if (!fm)
+			return;
 		try{
 			currentConfig.setManual(featureName, Selection.SELECTED);
 		} catch (SelectionNotPossibleException ex){
@@ -160,7 +178,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#rejectFeature(java.lang.String)
 	 */
 	@Override
-	public void rejectFeature(String featureName) {
+	public void eliminateFeature(String featureName) {
+		if (!fm)
+			return;
 		try{
 			currentConfig.setManual(featureName, Selection.UNSELECTED);	
 		} catch (SelectionNotPossibleException ex){
@@ -173,6 +193,8 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public void resetSelections() {
+		if (!fm)
+			return;
 		for (Feature feature : currentConfig.getSelectedFeatures())
 			currentConfig.setManual(feature.getName(), Selection.UNDEFINED);
 		validSelect = true;
@@ -183,7 +205,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#resetRejections()
 	 */
 	@Override
-	public void resetRejections() {
+	public void resetEliminations() {
+		if (!fm)
+			return;
 		for (Feature feature : currentConfig.getUnSelectedFeatures())
 			currentConfig.setManual(feature.getName(), Selection.UNDEFINED);
 		validReject = true;
@@ -194,6 +218,8 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public void reset() {
+		if (!fm)
+			return;
 		currentConfig.resetValues();
 		validSelect = true;
 		validReject = true;
@@ -204,6 +230,8 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public boolean isValidSelection() {
+		if (!fm)
+			return true;
 		return validSelect && validReject && currentConfig.number() > 0;
 	}
 
@@ -211,29 +239,45 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isSelectable(java.lang.String)
 	 */
 	@Override
-	public boolean isSelectable(String featureName) {
-		return currentConfig.leadToValidConfiguration(
-						currentConfig.getSelectablefeature(featureName), 
-						Selection.SELECTED, 
-						currentConfig.getSelectablefeature(featureName).getManual());
+	public boolean canBeSelected(String featureName) {
+		if (!fm)
+			return true;
+		SelectableFeature feature = currentConfig.getSelectablefeature(featureName);
+		Selection oldManual = feature.getManual();
+		try{
+			currentConfig.setManual(feature, Selection.SELECTED);
+			currentConfig.setManual(feature, oldManual);
+			return true;
+		} catch (SelectionNotPossibleException ex){
+			return false;
+		}
 	}
 
 	/* (non-Javadoc)
 	 * @see composer.rules.meta.FeatureModelInfo#isRejectable(java.lang.String)
 	 */
 	@Override
-	public boolean isRejectable(String featureName) {
-		return currentConfig.leadToValidConfiguration(
-				currentConfig.getSelectablefeature(featureName), 
-				Selection.UNSELECTED, 
-				currentConfig.getSelectablefeature(featureName).getManual());
+	public boolean canBeEliminated(String featureName) {
+		if (!fm)
+			return true;
+		SelectableFeature feature = currentConfig.getSelectablefeature(featureName);
+		Selection oldManual = feature.getManual();
+		try{
+			currentConfig.setManual(feature, Selection.UNSELECTED);
+			currentConfig.setManual(feature, oldManual);
+			return true;
+		} catch (SelectionNotPossibleException ex){
+			return false;
+		}
 	}
 
 	/* (non-Javadoc)
 	 * @see composer.rules.meta.FeatureModelInfo#isSelectionImplied(java.lang.String)
 	 */
 	@Override
-	public boolean isSelectionImplied(String featureName) {
+	public boolean isAlwaysSelected(String featureName) {
+		if (!fm)
+			return false;
 		return currentConfig.getSelectablefeature(featureName).getSelection() == Selection.SELECTED;
 	}
 
@@ -241,7 +285,9 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 * @see composer.rules.meta.FeatureModelInfo#isRejectionImplied(java.lang.String)
 	 */
 	@Override
-	public boolean isRejectionImplied(String featureName) {
+	public boolean isAlwaysEliminated(String featureName) {
+		if (!fm)
+			return false;
 		return currentConfig.getSelectablefeature(featureName).getSelection() == Selection.UNSELECTED;
 	}
 
@@ -250,6 +296,8 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	 */
 	@Override
 	public void addFeatureNodes(List<FSTNonTerminal> features) {
+		if (!obligatoryMethod)
+			return;
 		rootsForMethod = new HashMap<String, HashMap<String,List<Feature>>>();
 		for (FSTNonTerminal featureNode : features){
 			String featureName = getFeatureName(featureNode);
@@ -344,31 +392,19 @@ public class FeatureIDEModelInfo implements FeatureModelInfo {
 	}
 	
 	private void addToFeatureList(Feature feature, List<Feature> featureList){
-		if (featureList.isEmpty()){
+		if (!featureList.contains(feature))
 			featureList.add(feature);
-			return;
-		}
-		
-		if (featureList.contains(feature))
-			return;
-		
-		for (Feature listFeature : featureList){
-			if (isParent(feature,listFeature))
-				return;
-			if (isParent(listFeature,feature))
-				featureList.remove(listFeature);
-		}
-		
-		featureList.add(feature);
-			
 	}
-	
-	private boolean isParent(Feature child, Feature parent){
-		if (child.getParent() == null)
-			return false;
-		if (child.getParent() == parent)
-			return true;
-		return isParent(child.getParent(),parent);
+
+	/* (non-Javadoc)
+	 * @see composer.rules.meta.FeatureModelInfo#getValidClause()
+	 */
+	@Override
+	public String getValidClause() {
+		String clause = NodeCreator.createNodes(featureModel.clone()).toCNF().toString(NodeWriter.javaSymbols).toLowerCase(Locale.ENGLISH);
+		for (String feature : featureModel.getFeatureNames())
+			clause = clause.replaceAll(feature.toLowerCase(), "FM.FeatureModel." + feature.toLowerCase());
+		return clause;
 	}
 
 }

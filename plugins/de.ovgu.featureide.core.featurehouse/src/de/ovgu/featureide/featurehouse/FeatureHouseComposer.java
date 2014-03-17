@@ -22,6 +22,7 @@ package de.ovgu.featureide.featurehouse;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
@@ -383,12 +384,26 @@ public class FeatureHouseComposer extends ComposerExtensionClass {
 			
 			//ArrayList<FSTNode> nodes = composer.getFstnodes();
 			
-			
+			long start = System.currentTimeMillis();
 			FeatureModelInfo modelInfo = new FeatureIDEModelInfo(featureModel);
 			((FSTGenComposerExtension) composer).setModelInfo(modelInfo);
 			((FSTGenComposerExtension) composer).buildMetaProduct(
 					args//CONTRACT_COMPOSITION_EXPLICIT_CONTRACTING)
 					, features);
+			long end = System.currentTimeMillis();
+			
+			long duration = end-start;
+			File file = new File("duration.txt");
+			try{
+				FileWriter writer = new FileWriter(file,true);
+				writer.write(String.valueOf(duration));
+				writer.write(System.getProperty("line.separator"));
+				writer.flush();
+				writer.close();
+			} catch (IOException ex){
+				
+			}
+			
 		} catch (TokenMgrError e) {
 		} catch (Error e) {
 			FeatureHouseCorePlugin.getDefault().logError(e);
